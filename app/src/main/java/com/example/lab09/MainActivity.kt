@@ -1,6 +1,7 @@
 package com.example.lab09
 
 import android.Manifest
+import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.SurfaceTexture
@@ -15,7 +16,6 @@ import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.widget.Button
-import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -33,6 +33,7 @@ class MainActivity : AppCompatActivity() {
     lateinit var cameraId: String
     lateinit var backgroudHandler: Handler
     lateinit var backgroundThread: HandlerThread
+
 
     var stateCallback = @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     object: CameraDevice.StateCallback() {
@@ -80,6 +81,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+
+    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -91,12 +94,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    fun takePicture(){
-        val cameraManager = getSystemService(Context.CAMERA_SERVICE)
-        try {
-            Log.e("A", "TAKE PHOTO")
-        } catch (e: Exception){
 
+    @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
+    fun takePicture(){
+        if (cameraDevice == null) return
+        val surfaceTexture = cameraTextureView.surfaceTexture as SurfaceTexture;
+        surfaceTexture.setDefaultBufferSize(imageDimension.width, imageDimension.height)
+        val surface = Surface(surfaceTexture)
+        val cameraManager: CameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        try {
+            val takePictureBuilder: CaptureRequest.Builder =
+                cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+
+            takePictureBuilder.addTarget(surface);
+
+            val mCaptureRequest = takePictureBuilder.build()
+            cameraCaptureSession.capture(mCaptureRequest, null, null)
+        } catch (e: Exception){
+            Log.e(TAG, "Error", e)
         }
     }
 
@@ -104,8 +119,12 @@ class MainActivity : AppCompatActivity() {
     fun openCamera(){
         val cameraManager: CameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         cameraId = cameraManager.cameraIdList[0]
-        val cameraCharacteristics: CameraCharacteristics = cameraManager.getCameraCharacteristics(cameraId)
-        val streamConfigurationMap: StreamConfigurationMap? = cameraCharacteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+        val cameraCharacteristics: CameraCharacteristics = cameraManager.getCameraCharacteristics(
+            cameraId
+        )
+        val streamConfigurationMap: StreamConfigurationMap? = cameraCharacteristics.get(
+            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+        )
         imageDimension = streamConfigurationMap!!.getOutputSizes(SurfaceTexture::class.java)[0]
         if (ActivityCompat.checkSelfPermission(
                 this,
@@ -130,19 +149,23 @@ class MainActivity : AppCompatActivity() {
         val surface = Surface(surfaceTexture)
         captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         captureRequestBuilder.addTarget(surface)
-        cameraDevice.createCaptureSession(Arrays.asList(surface), object: CameraCaptureSession.StateCallback(){
-            override fun onConfigured(session: CameraCaptureSession) {
-                if(cameraDevice == null)
-                    return
-                cameraCaptureSession = session
-                updatePreview()
-            }
+        cameraDevice.createCaptureSession(
+            Arrays.asList(surface),
+            object : CameraCaptureSession.StateCallback() {
+                override fun onConfigured(session: CameraCaptureSession) {
+                    if (cameraDevice == null)
+                        return
+                    cameraCaptureSession = session
+                    updatePreview()
+                }
 
-            override fun onConfigureFailed(session: CameraCaptureSession) {
-                Log.e("ERR", "CONFIG")
-            }
+                override fun onConfigureFailed(session: CameraCaptureSession) {
+                    Log.e("ERR", "CONFIG")
+                }
 
-        }, null)
+            },
+            null
+        )
     }
 
     @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
@@ -151,7 +174,11 @@ class MainActivity : AppCompatActivity() {
             return
         captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         try {
-            cameraCaptureSession.setRepeatingRequest(captureRequestBuilder.build(), null, backgroudHandler)
+            cameraCaptureSession.setRepeatingRequest(
+                captureRequestBuilder.build(),
+                null,
+                backgroudHandler
+            )
         }catch (e: Exception){
             Log.e("ERR", e.toString())
 
