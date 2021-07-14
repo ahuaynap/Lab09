@@ -4,21 +4,25 @@ import android.Manifest
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.ImageFormat
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.StreamConfigurationMap
-import android.os.Build
-import android.os.Bundle
-import android.os.Handler
-import android.os.HandlerThread
+import android.media.Image
+import android.media.ImageReader
+import android.media.ImageReader.OnImageAvailableListener
+import android.os.*
 import android.util.Log
 import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.widget.Button
+import android.widget.ImageView
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import java.io.*
+import java.nio.ByteBuffer
 import java.util.*
 
 
@@ -33,7 +37,7 @@ class MainActivity : AppCompatActivity() {
     lateinit var cameraId: String
     lateinit var backgroudHandler: Handler
     lateinit var backgroundThread: HandlerThread
-
+    lateinit var imageView: ImageView
 
     var stateCallback = @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     object: CameraDevice.StateCallback() {
@@ -56,17 +60,17 @@ class MainActivity : AppCompatActivity() {
     var textureListener = @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
         object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(
-                surface: SurfaceTexture,
-                width: Int,
-                height: Int
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int
             ) {
                 openCamera()
             }
 
             override fun onSurfaceTextureSizeChanged(
-                surface: SurfaceTexture,
-                width: Int,
-                height: Int
+                    surface: SurfaceTexture,
+                    width: Int,
+                    height: Int
             ) {
 
             }
@@ -87,32 +91,61 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         cameraTextureView = findViewById(R.id.textureView)
+        imageView = findViewById(R.id.imageView)
         cameraTextureView.surfaceTextureListener = textureListener
         btnCamera = findViewById(R.id.btnCamera)
         btnCamera.setOnClickListener{
             takePicture()
         }
+
     }
 
 
     @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
     fun takePicture(){
         if (cameraDevice == null) return
-        val surfaceTexture = cameraTextureView.surfaceTexture as SurfaceTexture;
-        surfaceTexture.setDefaultBufferSize(imageDimension.width, imageDimension.height)
-        val surface = Surface(surfaceTexture)
         val cameraManager: CameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         try {
-            val takePictureBuilder: CaptureRequest.Builder =
-                cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            val characteristics: CameraCharacteristics = cameraManager.getCameraCharacteristics(cameraDevice.id)
+            var jpegSizes: Array<Size?>? = null
+            if (characteristics != null) jpegSizes = characteristics[CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP]!!.getOutputSizes(ImageFormat.JPEG)
+            var width = 640
+            var height = 480
+            if(jpegSizes != null && jpegSizes.isNotEmpty())
+            {
+                width = jpegSizes[0]!!.width;
+                height = jpegSizes[0]!!.height;
+            }
+            val reader: ImageReader = ImageReader.newInstance(width, height, ImageFormat.JPEG, 1)
+            val outputSurface: MutableList<Surface> = ArrayList(2)
+            outputSurface.add(reader.surface)
+            outputSurface.add(Surface(cameraTextureView.surfaceTexture))
 
-            takePictureBuilder.addTarget(surface);
+            val captureBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
+            captureBuilder.addTarget(reader.surface)
+            captureBuilder.set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
+            val readerListener: OnImageAvailableListener = object : OnImageAvailableListener {
+                override fun onImageAvailable(imageReader: ImageReader) {
+                    var image: Image? = null
+                    try {
+                        image = reader.acquireLatestImage()
+                        //Aca deberia añadirse image a imageView
+                    } catch (e: FileNotFoundException) {
+                        e.printStackTrace()
+                    } catch (e: IOException) {
+                        e.printStackTrace()
+                    } finally {
+                        run { image?.close() }
+                    }
+                }
 
-            val mCaptureRequest = takePictureBuilder.build()
-            cameraCaptureSession.capture(mCaptureRequest, null, null)
+            }
+
+
         } catch (e: Exception){
             Log.e(TAG, "Error", e)
         }
+
     }
 
     @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
@@ -120,22 +153,22 @@ class MainActivity : AppCompatActivity() {
         val cameraManager: CameraManager = getSystemService(Context.CAMERA_SERVICE) as CameraManager
         cameraId = cameraManager.cameraIdList[0]
         val cameraCharacteristics: CameraCharacteristics = cameraManager.getCameraCharacteristics(
-            cameraId
+                cameraId
         )
         val streamConfigurationMap: StreamConfigurationMap? = cameraCharacteristics.get(
-            CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
+                CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP
         )
         imageDimension = streamConfigurationMap!!.getOutputSizes(SurfaceTexture::class.java)[0]
         if (ActivityCompat.checkSelfPermission(
-                this,
-                Manifest.permission.CAMERA
-            ) != PackageManager.PERMISSION_GRANTED
+                        this,
+                        Manifest.permission.CAMERA
+                ) != PackageManager.PERMISSION_GRANTED
         ) {
             ActivityCompat.requestPermissions(
-                this, arrayOf(
+                    this, arrayOf(
                     Manifest.permission.CAMERA,
                     Manifest.permission.WRITE_EXTERNAL_STORAGE
-                ), REQUEST_CAMERA_PERMISSION
+            ), REQUEST_CAMERA_PERMISSION
             )
             return
         }
@@ -150,21 +183,21 @@ class MainActivity : AppCompatActivity() {
         captureRequestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
         captureRequestBuilder.addTarget(surface)
         cameraDevice.createCaptureSession(
-            Arrays.asList(surface),
-            object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    if (cameraDevice == null)
-                        return
-                    cameraCaptureSession = session
-                    updatePreview()
-                }
+                Arrays.asList(surface),
+                object : CameraCaptureSession.StateCallback() {
+                    override fun onConfigured(session: CameraCaptureSession) {
+                        if (cameraDevice == null)
+                            return
+                        cameraCaptureSession = session
+                        updatePreview()
+                    }
 
-                override fun onConfigureFailed(session: CameraCaptureSession) {
-                    Log.e("ERR", "CONFIG")
-                }
+                    override fun onConfigureFailed(session: CameraCaptureSession) {
+                        Log.e("ERR", "CONFIG")
+                    }
 
-            },
-            null
+                },
+                null
         )
     }
 
@@ -175,9 +208,9 @@ class MainActivity : AppCompatActivity() {
         captureRequestBuilder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         try {
             cameraCaptureSession.setRepeatingRequest(
-                captureRequestBuilder.build(),
-                null,
-                backgroudHandler
+                    captureRequestBuilder.build(),
+                    null,
+                    backgroudHandler
             )
         }catch (e: Exception){
             Log.e("ERR", e.toString())
